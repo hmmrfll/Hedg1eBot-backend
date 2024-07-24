@@ -1,9 +1,10 @@
 const TelegramBot = require("node-telegram-bot-api");
+require('dotenv').config();
 const mongoose = require('mongoose');
 const { welcomeOption, hedgeCalculatorOption, hedgePriceOption } = require('./options');
 const { getHedgeSuggestions } = require('./deribitApi');
 const User = require('./models/User'); // Импортируйте вашу модель User
-const token = '7323906062:AAFmOWBkjKZHbNayuARiI98uqeFkhfnsPa8';
+const token = process.env.TELEGRAM_TOKEN;
 const connectDB = require('./db'); // Подключение к базе данных
 
 const bot = new TelegramBot(token, { polling: true });
