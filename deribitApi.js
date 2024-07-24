@@ -92,7 +92,7 @@ function getNextThreeDatesAndFridays() {
     let currentDate = moment.tz('Europe/London').startOf('day');
 
     // Проверка текущего времени и добавление ближайшей даты
-    if (currentDate.hour() >= 9) {
+    if (moment.tz('Europe/London').hour() >= 9) {
         currentDate = currentDate.add(1, 'days');
     }
 
@@ -104,14 +104,19 @@ function getNextThreeDatesAndFridays() {
 
     // Перезапуск currentDate для поиска будущих пятниц
     currentDate = moment.tz('Europe/London').startOf('day');
-    if (currentDate.hour() >= 9) {
+    if (moment.tz('Europe/London').hour() >= 9) {
         currentDate = currentDate.add(1, 'days');
     }
 
     // Добавление будущих пятниц
-    while (fridays.length < 4) {
+    let fridayCount = 0;
+    while (fridayCount < 4) {
         if (currentDate.day() === 5) {
-            fridays.push(currentDate.clone());
+            const isInNextThreeDays = dates.some(date => date.isSame(currentDate, 'day'));
+            if (!isInNextThreeDays) {
+                fridays.push(currentDate.clone());
+                fridayCount++;
+            }
         }
         currentDate = currentDate.add(1, 'days');
     }

@@ -1,4 +1,5 @@
 const TelegramBot = require("node-telegram-bot-api");
+const mongoose = require('mongoose');
 const { welcomeOption, hedgeCalculatorOption, hedgePriceOption } = require('./options');
 const { getHedgeSuggestions } = require('./deribitApi');
 const User = require('./models/User'); // Импортируйте вашу модель User
@@ -122,8 +123,26 @@ const start = () => {
         }
 
         try {
-            if (text === "/start") {
+            if (text.startsWith("/start")) {
+                const referrerChatId = text.split(' ')[1]; // Получаем referrerChatId из команды
+
                 userState[chatId].state = null;
+
+                // Сохранение пользователя в базе данных при отправке команды /start
+                const newUser = await User.findOneAndUpdate(
+                    { telegramId: String(chatId) },
+                    { telegramId: String(chatId), username: username, referralCode: generateReferralCode(), referrerChatId: referrerChatId || null },
+                    { upsert: true, new: true }
+                );
+
+                // Если указан referrerChatId, обновляем информацию о рефералах
+                if (referrerChatId) {
+                    await User.findOneAndUpdate(
+                        { telegramId: referrerChatId },
+                        { $push: { referrals: newUser._id } }
+                    );
+                }
+
                 return welcomeMessage(chatId, username);
             }
 
@@ -244,44 +263,44 @@ const start = () => {
 
                     // Возвращаемся к стартовому сообщению
                     await bot.editMessageText(`Welcome! @${query.from.username}, you've joined Hedgie Bot. This bot helps traders and investors automate market tracking and analysis.`, {
-                chat_id: chatId,
+                        chat_id: chatId,
+                        message_id: messageId,
+                        parse_mode: 'HTML',
+                        reply_markup: welcomeOption.reply_markup
+                    });
+                } else {
+                    await bot.answerCallbackQuery(query.id, { text: 'No options to save.' });
+                }
+            } else if (data === 'back_to_main') {
+                await bot.editMessageText(`Welcome! @${query.from.username}, you've joined Hedgie Bot. This bot helps traders and investors automate market tracking and analysis.`, {
+                    chat_id: chatId,
                     message_id: messageId,
                     parse_mode: 'HTML',
                     reply_markup: welcomeOption.reply_markup
-            });
-            } else {
-                await bot.answerCallbackQuery(query.id, { text: 'No options to save.' });
-            }
-        } else if (data === 'back_to_main') {
-            await bot.editMessageText(`Welcome! @${query.from.username}, you've joined Hedgie Bot. This bot helps traders and investors automate market tracking and analysis.`, {
-                chat_id: chatId,
-                message_id: messageId,
-                parse_mode: 'HTML',
-                reply_markup: welcomeOption.reply_markup
-            });
-        } else if (data === 'favorites') {
-            const favoritesMessage = await getFavorites(chatId);
-            const favoritesOptions = {
-                parse_mode: 'HTML',
-                reply_markup: JSON.stringify({
-                    inline_keyboard: [
-                        [{ text: 'Back', callback_data: 'back_to_main' }]
-                    ]
-                })
-            };
+                });
+            } else if (data === 'favorites') {
+                const favoritesMessage = await getFavorites(chatId);
+                const favoritesOptions = {
+                    parse_mode: 'HTML',
+                    reply_markup: JSON.stringify({
+                        inline_keyboard: [
+                            [{ text: 'Back', callback_data: 'back_to_main' }]
+                        ]
+                    })
+                };
 
-            await bot.editMessageText(favoritesMessage, {
-                chat_id: chatId,
-                message_id: messageId,
-                ...favoritesOptions
-            });
-        } else {
-            console.log("Unhandled callback_query data:", data);
+                await bot.editMessageText(favoritesMessage, {
+                    chat_id: chatId,
+                    message_id: messageId,
+                    ...favoritesOptions
+                });
+            } else {
+                console.log("Unhandled callback_query data:", data);
+            }
+        } catch (error) {
+            console.error("Error processing callback_query:", error);
         }
-    } catch (error) {
-        console.error("Error processing callback_query:", error);
-    }
-});
+    });
 };
 
 const generateReferralCode = () => {
