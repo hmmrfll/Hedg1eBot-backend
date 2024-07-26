@@ -17,14 +17,34 @@ bot.setMyCommands([
 const userState = {}; // Переместим userState в глобальную область видимости
 
 const welcomeMessage = async (chatId, username, messageId) => {
-    await bot.editMessageText(
-        `Welcome! @${username}, you've joined Hedgie Bot. This bot helps traders and investors automate market tracking and analysis.`,
-        {
-            chat_id: chatId,
-            message_id: messageId,
-            reply_markup: welcomeOption.reply_markup
+    if (messageId) {
+        try {
+            await bot.editMessageText(
+                `Welcome! @${username}, you've joined Hedgie Bot. This bot helps traders and investors automate market tracking and analysis.`,
+                {
+                    chat_id: chatId,
+                    message_id: messageId,
+                    reply_markup: welcomeOption.reply_markup
+                }
+            );
+        } catch (error) {
+            if (error.response.body.error_code === 400) {
+                await bot.sendMessage(
+                    chatId,
+                    `Welcome! @${username}, you've joined Hedgie Bot. This bot helps traders and investors automate market tracking and analysis.`,
+                    welcomeOption
+                );
+            } else {
+                throw error;
+            }
         }
-    );
+    } else {
+        await bot.sendMessage(
+            chatId,
+            `Welcome! @${username}, you've joined Hedgie Bot. This bot helps traders and investors automate market tracking and analysis.`,
+            welcomeOption
+        );
+    }
 };
 
 const askPurchasePrice = async (chatId, asset) => {
