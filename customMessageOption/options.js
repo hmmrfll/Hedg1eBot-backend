@@ -3,7 +3,8 @@ module.exports = {
         reply_markup: JSON.stringify({
             inline_keyboard: [
                 [{text: `Hedge Calculator`, callback_data: "hedge_calculator"}],
-                [{text: `Favorites`, callback_data: "favorites"}]
+                [{text: `Favorites`, callback_data: "favorites"},
+                    {text: `Alerts`, callback_data: "alerts"}],
             ]
         })
     },

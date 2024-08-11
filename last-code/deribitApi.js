@@ -1,6 +1,7 @@
 const axios = require('axios');
 const moment = require('moment-timezone');
 
+
 /**
  * Рассчитывает минимальную цену страйка без округления.
  * @param {number} purchasePrice - Цена закупки актива.
@@ -231,8 +232,73 @@ async function getHedgeSuggestions(asset, purchasePrice, quantity, allowedLoss) 
 }
 
 
+// Функция для получения списка дат истечения
+async function getExpirationDates(asset) {
+    try {
+        const response = await axios.get(
+            `https://www.deribit.com/api/v2/public/get_instruments`,
+            {
+                params: { currency: asset, kind: 'option', expired: false },
+            }
+        );
+
+        if (response.data && response.data.result) {
+            const expirationDates = Array.from(new Set(response.data.result.map(instrument =>
+                moment(instrument.expiration_timestamp).format('DMMMYY').toUpperCase()
+            )));
+            return expirationDates;
+        } else {
+            throw new Error('No expiration dates available.');
+        }
+    } catch (error) {
+        console.error('Error fetching expiration dates:', error.response ? error.response.data : error.message);
+        throw error;
+    }
+}
+
+// Функция для получения цен страйков
+async function getStrikePrices(asset, expirationDate) {
+    try {
+        const response = await axios.get(
+            `https://www.deribit.com/api/v2/public/get_instruments`,
+            {
+                params: { currency: asset, kind: 'option', expired: false },
+            }
+        );
+
+        if (response.data && response.data.result) {
+            // Фильтруем инструменты по дате истечения
+            const strikePrices = Array.from(new Set(response.data.result
+                .filter(instrument => moment(instrument.expiration_timestamp).format('DMMMYY').toUpperCase() === expirationDate)
+                .map(instrument => instrument.strike)
+            ));
+            return strikePrices;
+        } else {
+            throw new Error('No strike prices available.');
+        }
+    } catch (error) {
+        console.error('Error fetching strike prices:', error.response ? error.response.data : error.message);
+        throw error;
+    }
+}
+
+// Функция для получения цены опциона с Deribit
+
+// Функция для получения цены опциона в USD
+async function fetchOptionPriceInUSD(asset, instrumentName, optionType) {
+    const optionPrice = await fetchOptionPrice(asset, instrumentName);
+    const marketPrice = await fetchMarketPrice(asset);
+    const optionPriceInUSD = optionPrice * marketPrice;
+    return optionPriceInUSD;
+}
+
 // Экспортируем функции
 module.exports = {
+    fetchMarketPrice,
+    getExpirationDates,
+    getStrikePrices,
+    fetchOptionPrice,
+    fetchOptionPriceInUSD,
     calculateStrikePrice,
     getHedgeSuggestions
 };

@@ -7,12 +7,6 @@ const User = require('./models/User');
 const token = process.env.TELEGRAM_TOKEN;
 const connectDB = require('./config/db');
 const { getExpirationDates, getStrikePrices, fetchOptionPrice, fetchMarketPrice } = require('./service/deribitApi');
-const { updateLastPricesForUser } = require('./notifications/updateLastPrice'); // Импортируем нашу функцию
-const { checkNotificationPrices } = require('./notifications/notificationOptionPrice');
-const { checkPercentChangeNotifications } = require('./notifications/notificationPercentChange');
-
-
-
 
 const bot = new TelegramBot(token, { polling: true });
 connectDB();
@@ -20,10 +14,6 @@ connectDB();
 bot.setMyCommands([
     { command: '/start', description: 'Launch Hedgie Bot' }
 ]);
-
-setInterval(() => checkNotificationPrices(bot), 5000);
-setInterval(() => checkPercentChangeNotifications(bot), 5000);
-
 
 const userState = {};
 
@@ -42,7 +32,6 @@ const {
     welcomeMessage,
     validateNumberInput,
     generateReferralCode,
-    getOptionTypeFromCallbackData,
 } = require('./customMessageOption/utils');
 
 const start = () => {
@@ -374,10 +363,6 @@ const start = () => {
                     ...options,
                 });
             } else if (data === 'favorites') {
-                const user = await User.findOne({ telegramId: String(chatId) });
-                if (user) {
-                    await updateLastPricesForUser(user._id); // Вызываем обновление цен
-                }
                 const { text, options } = await getFavorites(bot, chatId);
                 await bot.editMessageText(text, {
                     chat_id: chatId,
@@ -385,10 +370,6 @@ const start = () => {
                     ...options,
                 });
             } else if (data === 'alerts') {
-                const user = await User.findOne({ telegramId: String(chatId) });
-                if (user) {
-                    await updateLastPricesForUser(user._id); // Вызываем обновление цен
-                }
                 const { text: alertText, options: alertOptions } = await getAlerts(bot, chatId);
                 const alertKeyboard = {
                     inline_keyboard: [
@@ -633,7 +614,7 @@ const start = () => {
                 return bot.sendMessage(chatId, 'Enter percent change for notice:');
             } else if (data === 'change_time_frame') {
                 userState[chatId].state = 'waitingForTimeFrameAlerts';
-                return bot.sendMessage(chatId, 'Enter time frame (minute) for notice:');
+                return bot.sendMessage(chatId, 'Enter time frame for notice:');
             } else if (data === 'change_both') {
                 userState[chatId].state = 'waitingForBothAlerts';
                 return bot.sendMessage(chatId, 'Enter percent change for notice:');
@@ -661,27 +642,24 @@ const start = () => {
                 const optionType = getOptionTypeFromCallbackData(data);
                 const suggestions = optionType === 'Daily' ? userState[chatId].dailySuggestions : userState[chatId].weeklySuggestions;
 
-                console.log('Option type:', optionType);
-                console.log('Suggestions:', suggestions);
-
                 if (suggestions && !userState[chatId].isSaving) {
                     userState[chatId].isSaving = true;
-                    await saveTracks(bot, chatId, suggestions, userState[chatId].asset, parseFloat(userState[chatId].quantity), username, messageId);
+                    await saveTracks(chatId, suggestions, userState[chatId].asset, parseFloat(userState[chatId].quantity), username, messageId);
                     userState[chatId].isSaving = false;
                 } else {
                     await bot.answerCallbackQuery(query.id, { text: 'No options to save.' });
                 }
             } else if (data === "all_save") {
-                const allSuggestions = [...(userState[chatId].dailySuggestions || []), ...(userState[chatId].weeklySuggestions || [])];
+                const allSuggestions = [...userState[chatId].dailySuggestions, ...userState[chatId].weeklySuggestions];
                 if (allSuggestions.length > 0 && !userState[chatId].isSaving) {
                     userState[chatId].isSaving = true;
-                    await saveTracks(bot, chatId, allSuggestions, userState[chatId].asset, parseFloat(userState[chatId].quantity), username, messageId);
+                    await saveTracks(chatId, allSuggestions, userState[chatId].asset, parseFloat(userState[chatId].quantity), username, messageId);
                     userState[chatId].isSaving = false;
                 } else {
                     await bot.answerCallbackQuery(query.id, { text: 'No options to save.' });
                 }
             } else if (data === "specific_save") {
-                const allSuggestions = [...(userState[chatId].dailySuggestions || []), ...(userState[chatId].weeklySuggestions || [])];
+                const allSuggestions = [...userState[chatId].dailySuggestions, ...userState[chatId].weeklySuggestions];
                 const uniqueDates = Array.from(new Set(allSuggestions.map(s => s.expiration)));
 
                 const specificOptionPrice = {
@@ -709,7 +687,7 @@ const start = () => {
                 } else {
                     userState[chatId].selectedDates = userState[chatId].selectedDates.filter(d => d !== date);
                 }
-                const allSuggestions = [...(userState[chatId].dailySuggestions || []), ...(userState[chatId].weeklySuggestions || [])];
+                const allSuggestions = [...userState[chatId].dailySuggestions, ...userState[chatId].weeklySuggestions];
                 const uniqueDates = Array.from(new Set(allSuggestions.map(s => s.expiration)));
 
                 const specificOptionPrice = {
@@ -733,7 +711,7 @@ const start = () => {
 
                 if (specificSuggestions.length > 0 && !userState[chatId].isSaving) {
                     userState[chatId].isSaving = true;
-                    await saveTracks(bot, chatId, specificSuggestions, userState[chatId].asset, parseFloat(userState[chatId].quantity), username, messageId);
+                    await saveTracks(chatId, specificSuggestions, userState[chatId].asset, parseFloat(userState[chatId].quantity), username, messageId);
                     userState[chatId].isSaving = false;
                 } else {
                     await bot.answerCallbackQuery(query.id, { text: 'No options to save.' });
@@ -848,16 +826,8 @@ ${weeklyMessage}
     }
 };
 
-const saveTracks = async (bot, chatId, suggestions, asset, quantity, username, messageId) => {
+const saveTracks = async (chatId, suggestions, asset, quantity, username, messageId) => {
     try {
-        // Проверка на массив предложений
-        if (!Array.isArray(suggestions)) {
-            console.error('Suggestions is not an array:', suggestions);
-            await bot.sendMessage(chatId, 'No valid options to save.');
-            return;
-        }
-
-        // Создание треков для сохранения без фильтрации по нулевым значениям
         const tracks = suggestions.map(suggestion => ({
             optionId: generateUniqueId(),
             asset: asset,
@@ -865,26 +835,18 @@ const saveTracks = async (bot, chatId, suggestions, asset, quantity, username, m
             strikePrice: suggestion.chosenStrike,
             optionType: 'Put',
             optionPrice: Math.round((suggestion.hedgeCost / quantity) * 100) / 100,
-            notificationPrice: 0,  // Установка значения по умолчанию
-            percentChange: 0,       // Установка значения по умолчанию
-            lastPrice: 0,           // Установка значения по умолчанию
-            timeFrame: 0            // Установка значения по умолчанию
         }));
-
-        console.log('Tracks to be saved:', tracks);
 
         await User.updateOne(
             { telegramId: String(chatId) },
             { $push: { tracks: { $each: tracks } } }
         );
 
-        console.log('Tracks saved successfully.');
-
         delete userState[chatId].dailySuggestions;
         delete userState[chatId].weeklySuggestions;
         delete userState[chatId].selectedDates;
 
-        await welcomeMessage(bot, chatId, username, messageId);
+        await welcomeMessage(chatId, username, messageId);
     } catch (error) {
         console.error("Error saving tracks:", error);
         await bot.sendMessage(chatId, 'Error saving options. Please try again later.');
