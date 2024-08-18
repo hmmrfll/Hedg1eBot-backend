@@ -11,7 +11,7 @@ const getAlerts = async (bot, chatId) => {
                     parse_mode: 'HTML',
                     reply_markup: JSON.stringify({
                         inline_keyboard: [
-                            [{ text: 'Back', callback_data: 'back_to_main' }],
+                            [{ text: '< Back', callback_data: 'back_to_main' }],
                         ],
                     }),
                 },
@@ -29,29 +29,60 @@ const getAlerts = async (bot, chatId) => {
                     parse_mode: 'HTML',
                     reply_markup: JSON.stringify({
                         inline_keyboard: [
-                            [{ text: 'Back', callback_data: 'back_to_main' }],
+                            [{ text: '< Back', callback_data: 'back_to_main' }],
                         ],
                     }),
                 },
             };
         }
-
         return {
             text: alertTracks
-                .map(track =>
-                    `Asset: ${track.asset}\nExpiry Date: ${track.expiryDate}\nStrike Price: ${track.strikePrice}\nOption Type: ${track.optionType}\nOption Price: ${track.optionPrice} $\nNotification Price: ${track.notificationPrice} $\nPercent Change: ${track.percentChange} %\nLast Price: ${track.lastPrice} $\nTime Frame: ${track.timeFrame}`
-                )
-                .join('\n\n'),
+                .map(track => {
+                    const optionTypeFormatted = track.optionType.charAt(0).toUpperCase();
+
+                    let info = `<b>${track.asset}-${track.expiryDate}-${track.strikePrice}-${optionTypeFormatted}</b>\n\n`;
+
+                    // Добавляем настройки оповещений только если есть значения
+                    let alertSettings = '';
+                    if (track.notificationPrice > 0 || track.percentChange > 0 || track.timeFrame > 0) {
+                        alertSettings += `<b>Notification settings:</b>\n`;
+                        if (track.notificationPrice > 0) {
+                            alertSettings += `Notification Price: ${track.notificationPrice} $\n`;
+                        }
+                        if (track.percentChange > 0) {
+                            alertSettings += `Percent Change: ${track.percentChange} %\n`;
+                        }
+                        if (track.timeFrame > 0) {
+                            alertSettings += `Time Frame: ${track.timeFrame} min\n`;
+                        }
+                        alertSettings += '\n'; // Добавляем перенос строки после настроек
+                    }
+
+                    info += alertSettings;
+
+                    // Добавляем сохраненную цену и цену опции только если они больше нуля
+                    if (track.optionPrice > 0) {
+                        info += `Saved Price: ${track.optionPrice} $\n`;
+                    }
+                    if (track.lastPrice > 0) {
+                        info += `Option Price: <b>${track.lastPrice} $</b>\n`;
+                    }
+
+                    return info.trim();
+                })
+                .join('\n\n====================\n\n'),
             options: {
-                parse_mode: 'HTML',
+                parse_mode: 'HTML',  // Убедитесь, что этот параметр установлен
                 reply_markup: JSON.stringify({
                     inline_keyboard: [
-                        [{ text: 'Create Alerts', callback_data: 'create_alerts' }, { text: 'Remove Alerts', callback_data: 'remove_alerts' }],
-                        [{ text: 'Back', callback_data: 'back_to_main' }],
+                        [{ text: '🛠 Create Alerts', callback_data: 'create_alerts' }, { text: '🗑 Remove Alerts', callback_data: 'remove_alerts' }],
+                        [{ text: '< Back', callback_data: 'back_to_main' }],
                     ],
                 }),
             },
         };
+
+
     } catch (error) {
         console.error('Error fetching alerts:', error);
         return {
@@ -59,7 +90,7 @@ const getAlerts = async (bot, chatId) => {
             options: {
                 parse_mode: 'HTML',
                 reply_markup: JSON.stringify({
-                    inline_keyboard: [[{ text: 'Back', callback_data: 'back_to_main' }]],
+                    inline_keyboard: [[{ text: '< Back', callback_data: 'back_to_main' }]],
                 }),
             },
         };
@@ -89,8 +120,8 @@ const handleRemoveAlerts = async (bot, chatId, userState) => {
                             callback_data: `toggle_alert_${track._id}`,
                         },
                     ]),
-                    [{ text: 'Remove selected alerts', callback_data: 'remove_selected_alerts' }],
-                    [{ text: 'Back', callback_data: 'back_to_alerts' }],
+                    [{ text: '🗑 Remove selected alerts', callback_data: 'remove_selected_alerts' }],
+                    [{ text: '< Back', callback_data: 'back_to_alerts' }],
                 ],
             }),
         };

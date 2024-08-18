@@ -10,15 +10,14 @@ const { getExpirationDates, getStrikePrices, fetchOptionPrice, fetchMarketPrice 
 const { updateLastPricesForUser } = require('./notifications/updateLastPrice'); // Импортируем нашу функцию
 const { checkNotificationPrices } = require('./notifications/notificationOptionPrice');
 const { checkPercentChangeNotifications } = require('./notifications/notificationPercentChange');
-
-
-
+const cron = require('node-cron');
 
 const bot = new TelegramBot(token, { polling: true });
 connectDB();
 
 bot.setMyCommands([
-    { command: '/start', description: 'Launch Hedgie Bot' }
+    { command: '/start', description: 'Launch Hedgie Bot' },
+    { command: '/help', description: 'Usage Guide' }
 ]);
 
 setInterval(() => checkNotificationPrices(bot), 5000);
@@ -79,6 +78,29 @@ const start = () => {
                 }
 
                 return welcomeMessage(bot, chatId, username);
+            }
+
+            if (text.startsWith('/help')) {
+                const helpMessage = `
+<b>Welcome to Hedgie Bot!</b>
+
+Here are the available commands:
+
+/start - Launch the bot and get started.
+/help - Get information on using the bot and available commands.
+
+<b>How to use Hedgie Bot:</b>
+After sending /start, you will see the following buttons:
+
+💼 <b>Hedge Calculator</b> - Use this button to calculate hedge points for assets like BTC and ETH based on your input, such as purchase price, quantity, and allowed loss.
+⭐️ <b>Favorites</b> - This button allows you to view all your tracked options and manage the settings for their notifications. You can modify or remove existing alerts here.
+🔔 <b>Alerts</b> - Use this button to create notifications for any option. Set up price or percentage change alerts to track market movements.
+
+For any assistance or inquiries, please contact our support team at: support@hedgiebot.com
+
+<b>Happy trading!</b>
+`;
+                return bot.sendMessage(chatId, helpMessage, { parse_mode: 'HTML' });
             }
 
             // Hedge Calculator States
@@ -307,43 +329,55 @@ const start = () => {
                 const optionId = data.replace('change_notification_option_price_', '');
                 userState[chatId].state = 'waitingForNotificationPriceFavorites';
                 userState[chatId].currentOptionId = optionId;
+                await resetNotificationPending(optionId);
                 return bot.sendMessage(chatId, 'Enter notification option price for notice (to deactivate the setting, enter 0):');
-            } else if (data.startsWith('change_notification_change_')) {
+            }
+
+
+            else if (data.startsWith('change_notification_change_')) {
                 const optionId = data.replace('change_notification_change_', '');
                 const newInlineKeyboard = {
                     inline_keyboard: [
                         [
-                            { text: 'Change %', callback_data: `change_percent_${optionId}` },
-                            { text: 'Time Frame', callback_data: `change_time_frame_${optionId}` },
-                            { text: 'Change Both', callback_data: `change_both_${optionId}` }
+                            { text: '📐 Change %', callback_data: `change_percent_${optionId}` },
+                            { text: '⌛️ Time Frame', callback_data: `change_time_frame_${optionId}` },
                         ],
-                        [{ text: 'Back', callback_data: `back_to_edit_option_${optionId}` }]
+                        [{ text: '📲 Change Both', callback_data: `change_both_${optionId}` }],
+                        [{ text: '< Back', callback_data: `back_to_edit_option_${optionId}` }]
                     ]
                 };
                 return bot.editMessageReplyMarkup(newInlineKeyboard, {
                     chat_id: chatId,
+                    parse_mode: 'HTML',
                     message_id: messageId,
                 });
-            } else if (data.startsWith('change_percent_')) {
+            }
+
+
+            else if (data.startsWith('change_percent_')) {
                 const optionId = data.replace('change_percent_', '');
                 userState[chatId].state = 'waitingForPercentChangeFavorites';
                 userState[chatId].currentOptionId = optionId;
+                await resetNotificationPending(optionId);
                 return bot.sendMessage(chatId, 'Enter percent change for notice:');
             } else if (data.startsWith('change_time_frame_')) {
                 const optionId = data.replace('change_time_frame_', '');
                 userState[chatId].state = 'waitingForTimeFrameFavorites';
                 userState[chatId].currentOptionId = optionId;
+                await resetNotificationPending(optionId);
                 return bot.sendMessage(chatId, 'Enter time frame for notice:');
             } else if (data.startsWith('change_both_')) {
                 const optionId = data.replace('change_both_', '');
                 userState[chatId].state = 'waitingForBothFavorites';
                 userState[chatId].currentOptionId = optionId;
+                await resetNotificationPending(optionId);
                 return bot.sendMessage(chatId, 'Enter percent change for notice:');
             } else if (data.startsWith('back_to_edit_option_')) {
                 const optionId = data.replace('back_to_edit_option_', '');
                 const { text, options } = await getEditOptionDetails(bot, chatId, optionId);
                 await bot.editMessageText(text, {
                     chat_id: chatId,
+                    parse_mode: 'HTML',
                     message_id: messageId,
                     ...options,
                 });
@@ -392,14 +426,15 @@ const start = () => {
                 const { text: alertText, options: alertOptions } = await getAlerts(bot, chatId);
                 const alertKeyboard = {
                     inline_keyboard: [
-                        [{ text: 'Create Alerts', callback_data: 'create_alerts' }],
-                        [{ text: 'Remove Alerts', callback_data: 'remove_alerts' }],
-                        [{ text: 'Back', callback_data: 'back_to_main' }],
+                        [{ text: '🛠 Create Alerts', callback_data: 'create_alerts' }],
+                         [{ text: '🗑 Remove Settings', callback_data: 'remove_alerts' }],
+                        [{ text: '< Back', callback_data: 'back_to_main' }],
                     ],
                 };
                 await bot.editMessageText(alertText, {
                     chat_id: chatId,
                     message_id: messageId,
+                    parse_mode: 'HTML',
                     reply_markup: JSON.stringify(alertKeyboard),
                 });
             } else if (data.startsWith('remove_alert_')) {
@@ -416,36 +451,41 @@ const start = () => {
                 const alertTracks = user.tracks.filter(track =>
                     track.notificationPrice !== 0 || track.percentChange !== 0 || track.timeFrame !== 0
                 );
+
+                // Создаем inline keyboard с полным форматом текста
                 const removeInlineKeyboard = {
                     inline_keyboard: [
                         ...alertTracks.map(track => [
                             {
-                                text: `${
-                                    userState[chatId].selectedAlerts && userState[chatId].selectedAlerts.includes(track._id) ? '✅' : ''
-                                } ${track.asset} ${track.expiryDate}`,
+                                text: `${track.asset}-${track.expiryDate}-${track.strikePrice}-${track.optionType.charAt(0).toUpperCase()}`,
                                 callback_data: `remove_alert_${track._id}`,
                             },
                         ]),
-                        [{ text: 'Back', callback_data: 'alerts' }],
+                        [{ text: '< Back', callback_data: 'alerts' }],
                     ],
                 };
+
+                // Отправляем обновленную клавиатуру
                 await bot.editMessageReplyMarkup(removeInlineKeyboard, {
                     chat_id: chatId,
                     message_id: messageId,
+                    parse_mode: 'HTML',
                 });
-            } else if (data === 'create_alerts') {
+            }
+            else if (data === 'create_alerts') {
                 const createAlertKeyboard = {
                     inline_keyboard: [
                         [
                             { text: 'BTC', callback_data: 'create_alert_BTC' },
                             { text: 'ETH', callback_data: 'create_alert_ETH' }
                         ],
-                        [{ text: 'Back', callback_data: 'alerts' }],
+                        [{ text: '< Back', callback_data: 'alerts' }],
                     ],
                 };
                 await bot.editMessageText('Select asset for notifications:', {
                     chat_id: chatId,
                     message_id: messageId,
+                    parse_mode: 'HTML',
                     reply_markup: createAlertKeyboard,
                 });
             } else if (data.startsWith('create_alert_')) {
@@ -461,12 +501,13 @@ const start = () => {
                             { text: date, callback_data: `select_expiration_${date}` }
                         ]),
                         expirationDates.length > 5 ? [{ text: '->>', callback_data: 'next_expirations' }] : [],
-                        [{ text: 'Back', callback_data: 'create_alerts' }],
+                        [{ text: '< Back', callback_data: 'create_alerts' }],
                     ],
                 };
                 await bot.editMessageText('Select the date of the expiration:', {
                     chat_id: chatId,
                     message_id: messageId,
+                    parse_mode: 'HTML',
                     reply_markup: expirationKeyboard,
                 });
             } else if (data === 'next_expirations') {
@@ -481,12 +522,13 @@ const start = () => {
                         ]),
                         expirationDates.length === 5 ? [{ text: '->>', callback_data: 'next_expirations' }] : [],
                         start > 0 ? [{ text: '<<-', callback_data: 'prev_expirations' }] : [],
-                        [{ text: 'Back', callback_data: 'create_alerts' }],
+                        [{ text: '< Back', callback_data: 'create_alerts' }],
                     ],
                 };
                 await bot.editMessageText('Select the date of the expiration:', {
                     chat_id: chatId,
                     message_id: messageId,
+                    parse_mode: 'HTML',
                     reply_markup: expirationKeyboard,
                 });
             } else if (data === 'prev_expirations') {
@@ -501,12 +543,13 @@ const start = () => {
                         ]),
                         expirationDates.length === 5 ? [{ text: '->>', callback_data: 'next_expirations' }] : [],
                         start > 0 ? [{ text: '<<-', callback_data: 'prev_expirations' }] : [],
-                        [{ text: 'Back', callback_data: 'create_alerts' }],
+                        [{ text: '< Back', callback_data: 'create_alerts' }],
                     ],
                 };
                 await bot.editMessageText('Select the date of the expiration:', {
                     chat_id: chatId,
                     message_id: messageId,
+                    parse_mode: 'HTML',
                     reply_markup: expirationKeyboard,
                 });
             } else if (data.startsWith('select_expiration_')) {
@@ -514,78 +557,98 @@ const start = () => {
                 userState[chatId].selectedExpiration = expirationDate;
                 const strikePrices = await getStrikePrices(userState[chatId].selectedAsset, expirationDate);
                 userState[chatId].strikePrices = strikePrices;
-                userState[chatId].strikePage = 0;
+
+                // Определите текущую рыночную цену
+                const currentPrice = await fetchMarketPrice(userState[chatId].selectedAsset);
+
+                // Найдите ближайший страйк к текущему курсу
+                const closestStrike = strikePrices.reduce((prev, curr) => Math.abs(curr - currentPrice) < Math.abs(prev - currentPrice) ? curr : prev);
+
+                // Установите начальную страницу, исходя из ближайшего страйка
+                userState[chatId].strikePage = Math.max(0, Math.floor(strikePrices.indexOf(closestStrike) / 10));
+
+                // Отображение страйков на текущей странице
+                const start = userState[chatId].strikePage * 10;
+                const end = start + 10;
+                const strikePage = strikePrices.slice(start, end);
 
                 const strikeKeyboard = {
                     inline_keyboard: [
-                        ...strikePrices.slice(0, 10).map(price => [
+                        ...strikePage.map(price => [
                             { text: price.toString(), callback_data: `select_strike_${price}` }
                         ]),
                         strikePrices.length > 10 ? [{ text: '->>', callback_data: 'next_strikes' }] : [],
-                        [{ text: 'Back', callback_data: 'create_alerts' }],
+                        start > 0 ? [{ text: '<<-', callback_data: 'prev_strikes' }] : [],
+                        [{ text: '< Back', callback_data: 'create_alerts' }],
                     ],
                 };
+
                 await bot.editMessageText('Select the strike price:', {
                     chat_id: chatId,
                     message_id: messageId,
+                    parse_mode: 'HTML',
                     reply_markup: strikeKeyboard,
                 });
             } else if (data === 'next_strikes') {
                 userState[chatId].strikePage = (userState[chatId].strikePage || 0) + 1;
                 const start = userState[chatId].strikePage * 10;
                 const end = start + 10;
-                const strikePrices = userState[chatId].strikePrices.slice(start, end);
+                const strikePage = userState[chatId].strikePrices.slice(start, end);
                 const strikeKeyboard = {
                     inline_keyboard: [
-                        ...strikePrices.map(price => [
+                        ...strikePage.map(price => [
                             { text: price.toString(), callback_data: `select_strike_${price}` }
                         ]),
-                        strikePrices.length === 10 ? [{ text: '->>', callback_data: 'next_strikes' }] : [],
+                        strikePage.length === 10 ? [{ text: '->>', callback_data: 'next_strikes' }] : [],
                         start > 0 ? [{ text: '<<-', callback_data: 'prev_strikes' }] : [],
-                        [{ text: 'Back', callback_data: 'create_alerts' }],
+                        [{ text: '< Back', callback_data: 'create_alerts' }],
                     ],
                 };
                 await bot.editMessageText('Select the strike price:', {
                     chat_id: chatId,
                     message_id: messageId,
+                    parse_mode: 'HTML',
                     reply_markup: strikeKeyboard,
                 });
             } else if (data === 'prev_strikes') {
                 userState[chatId].strikePage = (userState[chatId].strikePage || 1) - 1;
                 const start = userState[chatId].strikePage * 10;
                 const end = start + 10;
-                const strikePrices = userState[chatId].strikePrices.slice(start, end);
+                const strikePage = userState[chatId].strikePrices.slice(start, end);
                 const strikeKeyboard = {
                     inline_keyboard: [
-                        ...strikePrices.map(price => [
+                        ...strikePage.map(price => [
                             { text: price.toString(), callback_data: `select_strike_${price}` }
                         ]),
-                        strikePrices.length === 10 ? [{ text: '->>', callback_data: 'next_strikes' }] : [],
+                        strikePage.length === 10 ? [{ text: '->>', callback_data: 'next_strikes' }] : [],
                         start > 0 ? [{ text: '<<-', callback_data: 'prev_strikes' }] : [],
-                        [{ text: 'Back', callback_data: 'create_alerts' }],
+                        [{ text: '< Back', callback_data: 'create_alerts' }],
                     ],
                 };
                 await bot.editMessageText('Select the strike price:', {
                     chat_id: chatId,
                     message_id: messageId,
+                    parse_mode: 'HTML',
                     reply_markup: strikeKeyboard,
                 });
-            } else if (data.startsWith('select_strike_')) {
+            }
+            else if (data.startsWith('select_strike_')) {
                 const strikePrice = data.replace('select_strike_', '');
                 userState[chatId].selectedStrike = strikePrice;
 
                 const optionTypeKeyboard = {
                     inline_keyboard: [
                         [
-                            { text: 'Call', callback_data: 'select_option_type_call' },
-                            { text: 'Put', callback_data: 'select_option_type_put' }
+                            { text: '📈 Call', callback_data: 'select_option_type_call' },
+                            { text: '📉 Put', callback_data: 'select_option_type_put' }
                         ],
-                        [{ text: 'Back', callback_data: 'create_alerts' }],
+                        [{ text: '< Back', callback_data: 'create_alerts' }],
                     ],
                 };
                 await bot.editMessageText('Select option type:', {
                     chat_id: chatId,
                     message_id: messageId,
+                    parse_mode: 'HTML',
                     reply_markup: optionTypeKeyboard,
                 });
             } else if (data.startsWith('select_option_type_')) {
@@ -595,16 +658,26 @@ const start = () => {
                 const notificationTypeKeyboard = {
                     inline_keyboard: [
                         [
-                            { text: 'Notification option price', callback_data: 'select_notification_option_price' },
-                            { text: 'Notification change %', callback_data: 'select_notification_change' }
+                            { text: '💸 Option price', callback_data: 'select_notification_option_price' },
+                            { text: '⏰ Changes', callback_data: 'select_notification_change' }
                         ],
-                        [{ text: 'Both', callback_data: 'select_both_notification' }],
-                        [{ text: 'Back', callback_data: 'create_alerts' }],
+                        [{ text: '📲 Both', callback_data: 'select_both_notification' }],
+                        [{ text: '< Back', callback_data: 'create_alerts' }],
                     ],
                 };
-                await bot.editMessageText('Select the notification type:', {
+
+                const explanationMessage = `
+<b>Select the notification type:</b>
+
+💸 <b>Option price</b> • Receive notifications for option price changes.\n
+⏰ <b>Changes</b> • Set up notifications for general changes. You can configure the percentage change and time frame to receive alerts when the asset price changes by the specified percentage within the given time period.\n
+📲 <b>Both</b> • Receive notifications for both option price changes and general changes.
+`;
+
+                await bot.editMessageText(explanationMessage, {
                     chat_id: chatId,
                     message_id: messageId,
+                    parse_mode: 'HTML',
                     reply_markup: notificationTypeKeyboard,
                 });
             } else if (data === 'select_notification_option_price') {
@@ -616,16 +689,25 @@ const start = () => {
                 const changeTypeKeyboard = {
                     inline_keyboard: [
                         [
-                            { text: 'Change %', callback_data: 'change_percent' },
-                            { text: 'Time Frame', callback_data: 'change_time_frame' }
+                            { text: '📐 Change %', callback_data: 'change_percent' },
+                            { text: '⏳ Time Frame', callback_data: 'change_time_frame' }
                         ],
-                        [{ text: 'Both', callback_data: 'change_both' }],
-                        [{ text: 'Back', callback_data: 'create_alerts' }],
+                        [{ text: '📲 Both', callback_data: 'change_both' }],
+                        [{ text: '< Back', callback_data: 'create_alerts' }],
                     ],
                 };
-                await bot.editMessageText('Select the change type:', {
+
+                const explanationMessageChanges = `
+<b>Select the change type:</b>\n
+<b>📐 Change %</b> - Configure notifications based on percentage change. Set the percentage by which the asset price should change to receive an alert.\n
+<b>⏳ Time Frame</b> - Set the time frame within which the percentage change should occur to trigger the notification.\n
+<b>📲 Both</b> - Configure notifications for both percentage change and time frame.\n
+`;
+
+                await bot.editMessageText(explanationMessageChanges, {
                     chat_id: chatId,
                     message_id: messageId,
+                    parse_mode: 'HTML',
                     reply_markup: changeTypeKeyboard,
                 });
             } else if (data === 'change_percent') {
@@ -693,7 +775,7 @@ const start = () => {
                                 callback_data: `specific_${date}`
                             }]),
                             [{ text: 'Save selected', callback_data: 'save_selected' }],
-                            [{ text: 'Back', callback_data: 'back_to_main' }]
+                            [{ text: '< Back', callback_data: 'back_to_main' }]
                         ]
                     })
                 };
@@ -721,7 +803,7 @@ const start = () => {
                                 callback_data: `specific_${date}`
                             }]),
                             [{ text: 'Save selected', callback_data: 'save_selected' }],
-                            [{ text: 'Back', callback_data: 'back_to_main' }]
+                            [{ text: '< Back', callback_data: 'back_to_main' }]
                         ]
                     })
                 };
@@ -738,7 +820,79 @@ const start = () => {
                 } else {
                     await bot.answerCallbackQuery(query.id, { text: 'No options to save.' });
                 }
-            } else {
+            } else if (data.startsWith('keep_notification_')) {
+                const trackId = data.replace('keep_notification_', '');
+
+                const user = await User.findOne({ telegramId: String(chatId) });
+                const track = user.tracks.id(trackId);
+
+                if (track) {
+                    track.notificationPending = false; // Сбрасываем ожидание действия
+                    await user.save();
+
+                    await bot.answerCallbackQuery(query.id, { text: 'Notification settings kept.' });
+
+                    await bot.editMessageText(
+                        `Welcome! @${username}, you've joined Hedgie Bot. This bot helps traders and investors automate market tracking and analysis.`,
+                        {
+                            chat_id: chatId,
+                            message_id: messageId,
+                            parse_mode: 'HTML',
+                            reply_markup: welcomeOption.reply_markup,
+                        }
+                    );
+                }
+
+            } else if (data.startsWith('remove_notification_price_')) {
+                const trackId = data.replace('remove_notification_price_', '');
+
+                const user = await User.findOne({ telegramId: String(chatId) });
+                const track = user.tracks.id(trackId);
+
+                if (track) {
+                    track.notificationPrice = 0; // Удаляем только настройки уведомлений по цене
+                    track.notificationPending = false; // Сбрасываем ожидание действия, если оно было
+
+                    await user.save();
+
+                    await bot.answerCallbackQuery(query.id, { text: 'Price notification settings removed.' });
+
+                    await bot.editMessageText(
+                        `Welcome! @${username}, you've joined Hedgie Bot. This bot helps traders and investors automate market tracking and analysis.`,
+                        {
+                            chat_id: chatId,
+                            message_id: messageId,
+                            parse_mode: 'HTML',
+                            reply_markup: welcomeOption.reply_markup,
+                        }
+                    );
+                }
+            } else if (data.startsWith('remove_notification_change_')) {
+                const trackId = data.replace('remove_notification_change_', '');
+
+                const user = await User.findOne({ telegramId: String(chatId) });
+                const track = user.tracks.id(trackId);
+
+                if (track) {
+                    track.percentChange = 0;    // Удаляем уведомления по проценту изменения
+                    track.timeFrame = 0;        // Удаляем уведомления по таймфрейму
+                    track.notificationPending = false; // Сбрасываем ожидание действия, если оно было
+
+                    await user.save();
+
+                    await bot.answerCallbackQuery(query.id, { text: 'Percent/TimeFrame notification settings removed.' });
+
+                    await bot.editMessageText(
+                        `Welcome! @${username}, you've joined Hedgie Bot. This bot helps traders and investors automate market tracking and analysis.`,
+                        {
+                            chat_id: chatId,
+                            message_id: messageId,
+                            parse_mode: 'HTML',
+                            reply_markup: welcomeOption.reply_markup,
+                        }
+                    );
+                }
+            }  else {
                 console.log('Unhandled callback_query data:', data);
             }
         } catch (error) {
@@ -799,6 +953,26 @@ async function saveNotificationSettings(chatId) {
     }
 }
 
+async function resetNotificationPending(optionId) {
+    try {
+        const user = await User.findOne({ 'tracks._id': optionId });
+        if (user) {
+            const track = user.tracks.id(optionId);
+            if (track) {
+                track.notificationPending = false;
+                await user.save(); // Сохраняем изменения
+                console.log(`Notification pending reset for option: ${optionId}`);
+            } else {
+                console.log(`Track not found for optionId: ${optionId}`);
+            }
+        } else {
+            console.log(`User not found for optionId: ${optionId}`);
+        }
+    } catch (error) {
+        console.error(`Error resetting notificationPending for optionId: ${optionId}`, error);
+    }
+}
+
 const askPurchasePrice = async (chatId, asset) => {
     await bot.sendMessage(chatId, `You've selected ${asset}. Enter the purchase price:`);
 };
@@ -834,6 +1008,8 @@ ${dailyMessage}
 
 <b>Hedge suggestions (Weekly):</b>
 ${weeklyMessage}
+
+Which options would you like to save:
 `;
 
         await bot.sendMessage(chatId, message, hedgePriceOption);

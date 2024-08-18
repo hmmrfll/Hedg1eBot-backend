@@ -10,7 +10,7 @@ const getFavorites = async (bot, chatId) => {
 					parse_mode: 'HTML',
 					reply_markup: JSON.stringify({
 						inline_keyboard: [
-							[{ text: 'Back', callback_data: 'back_to_main' }],
+							[{ text: '< Back', callback_data: 'back_to_main' }],
 						],
 					}),
 				},
@@ -18,26 +18,57 @@ const getFavorites = async (bot, chatId) => {
 		}
 		return {
 			text: user.tracks
-				.map(
-					track =>
-						`Asset: ${track.asset}\nExpiry Date: ${track.expiryDate}\nStrike Price: ${track.strikePrice}\nOption Type: ${track.optionType}\nOption Price: ${track.optionPrice} $\nNotification Price: ${track.notificationPrice} $\nPercent Change: ${track.percentChange} %\nLast Price: ${track.lastPrice} $\nTime Frame: ${track.timeFrame}`
-				)
-				.join('\n\n'),
+				.map(track => {
+					// Capitalize the first letter of the option type
+					const optionTypeFormatted = track.optionType.charAt(0).toUpperCase();
+
+					let info = `<b>${track.asset}-${track.expiryDate}-${track.strikePrice}-${optionTypeFormatted}</b>\n\n`;
+
+					// Add alert settings only if there are any values
+					let alertSettings = '';
+					if (track.notificationPrice > 0 || track.percentChange > 0 || track.timeFrame > 0) {
+						alertSettings += `<b>Notification settings:</b>\n`;
+						if (track.notificationPrice > 0) {
+							alertSettings += `Notification Price: ${track.notificationPrice} $\n`;
+						}
+						if (track.percentChange > 0) {
+							alertSettings += `Percent Change: ${track.percentChange} %\n`;
+						}
+						if (track.timeFrame > 0) {
+							alertSettings += `Time Frame: ${track.timeFrame} min\n`;
+						}
+						alertSettings += '\n'; // Add a newline for separation after alert settings
+					}
+
+					info += alertSettings;
+
+					// Add saved price and option price only if they are greater than zero
+					if (track.optionPrice > 0) {
+						info += `Saved Price: ${track.optionPrice} $\n`;
+					}
+					if (track.lastPrice > 0) {
+						info += `Option Price: <b>${track.lastPrice} $</b>\n`;
+					}
+
+					return info.trim();
+				})
+				.join('\n\n====================\n\n'),
 			options: {
 				parse_mode: 'HTML',
 				reply_markup: JSON.stringify({
 					inline_keyboard: [
 						...user.tracks.map(track => [
 							{
-								text: `${track.asset} ${track.expiryDate}`,
+								text: `${track.asset}-${track.expiryDate}-${track.strikePrice}-${track.optionType.charAt(0).toUpperCase()}`,
 								callback_data: `edit_${track._id}`,
 							},
 						]),
-						[{ text: 'Back', callback_data: 'back_to_main' }],
+						[{ text: '< Back', callback_data: 'back_to_main' }],
 					],
 				}),
 			},
 		};
+
 	} catch (error) {
 		console.error('Error fetching favorites:', error);
 		return {
@@ -45,7 +76,7 @@ const getFavorites = async (bot, chatId) => {
 			options: {
 				parse_mode: 'HTML',
 				reply_markup: JSON.stringify({
-					inline_keyboard: [[{ text: 'Back', callback_data: 'back_to_main' }]],
+					inline_keyboard: [[{ text: '< Back', callback_data: 'back_to_main' }]],
 				}),
 			},
 		};
@@ -61,7 +92,7 @@ const getOptionDetails = async (bot, chatId, optionId) => {
 				options: {
 					parse_mode: 'HTML',
 					reply_markup: JSON.stringify({
-						inline_keyboard: [[{ text: 'Back', callback_data: 'favorites' }]],
+						inline_keyboard: [[{ text: '< Back', callback_data: 'favorites' }]],
 					}),
 				},
 			};
@@ -73,26 +104,33 @@ const getOptionDetails = async (bot, chatId, optionId) => {
 				options: {
 					parse_mode: 'HTML',
 					reply_markup: JSON.stringify({
-						inline_keyboard: [[{ text: 'Back', callback_data: 'favorites' }]],
+						inline_keyboard: [[{ text: '< Back', callback_data: 'favorites' }]],
 					}),
 				},
 			};
 		}
 		return {
-			text: `Asset: ${option.asset}\nExpiry Date: ${option.expiryDate}\nStrike Price: ${option.strikePrice}\nOption Type: ${option.optionType}\nOption Price: ${option.optionPrice} $\nNotification Price: ${option.notificationPrice} $\nPercent Change: ${option.percentChange} %\nLast Price: ${option.lastPrice} $\nTime Frame: ${option.timeFrame}`,
+			text: `<b>${option.asset}-${option.expiryDate}-${option.strikePrice}-${option.optionType.charAt(0).toUpperCase()}</b>\n\n` +
+				`<b>Notification settings:</b>\n` +
+				`Notification Price: ${option.notificationPrice} $\n` +
+				`Percent Change: ${option.percentChange} %\n` +
+				`Time Frame: ${option.timeFrame} min\n\n` +
+				`Saved Price: ${option.optionPrice} $\n` +
+				`Option Price: <b>${option.lastPrice} $</b>\n`,
 			options: {
 				parse_mode: 'HTML',
 				reply_markup: JSON.stringify({
 					inline_keyboard: [
 						[
-							{ text: 'Edit', callback_data: `edit_option_${optionId}` },
-							{ text: 'Remove', callback_data: `remove_option_${optionId}` },
+							{ text: '✏️ Edit Notification', callback_data: `edit_option_${optionId}` }],
+							[{ text: '🗑 Remove', callback_data: `remove_option_${optionId}` },
 						],
-						[{ text: 'Back', callback_data: 'favorites' }],
+						[{ text: '< Back', callback_data: 'favorites' }],
 					],
 				}),
 			},
 		};
+
 	} catch (error) {
 		console.error('Error fetching option details:', error);
 		return {
@@ -134,15 +172,28 @@ const getEditOptionDetails = async (bot, chatId, optionId) => {
 			};
 		}
 		return {
-			text: `Asset: ${option.asset}\nExpiry Date: ${option.expiryDate}\nStrike Price: ${option.strikePrice}\nOption Type: ${option.optionType}\nOption Price: ${option.optionPrice} $\nNotification Price: ${option.notificationPrice} $\nPercent Change: ${option.percentChange} %\nLast Price: ${option.lastPrice} $\nTime Frame: ${option.timeFrame}`,
+			text: `<b>${option.asset}-${option.expiryDate}-${option.strikePrice}-${option.optionType.charAt(0).toUpperCase()}</b>\n\n` +
+				`<b>Notification settings:</b>\n` +
+				`Notification Price: ${option.notificationPrice} $\n` +
+				`Percent Change: ${option.percentChange} %\n` +
+				`Time Frame: ${option.timeFrame} min\n\n` +
+				`Saved Price: ${option.optionPrice} $\n` +
+				`Option Price: <b>${option.lastPrice} $</b>\n\n` +
+				`<b>Choose an option below:</b>\n` +
+				`<b>💸 Option price</b> - Change the price at which you receive notifications for this option.\n` +
+				`<b>⏰ Changes</b> - Adjust the percentage change and time frame for notifications.\n` +
+				`     - 📐 <b>Change %</b> - Configure notifications based on percentage change.\n` +
+				`     - ⌛️ <b>Time Frame</b> - Set the time frame within which the percentage change should occur.\n` +
+				`     - 📲 <b>Change Both</b> - Configure notifications for both percentage change and time frame.\n` +
+				`<b>🗑 Remove Settings</b> - Remove the notification settings for this option.\n`,
 			options: {
 				parse_mode: 'HTML',
 				reply_markup: JSON.stringify({
 					inline_keyboard: [
-						[{ text: 'Change notification Option Price', callback_data: `change_notification_option_price_${optionId}` }],
-						[{ text: 'Change notification change %', callback_data: `change_notification_change_${optionId}` }],
-						[{ text: 'Remove notification settings', callback_data: `remove_notification_settings_${optionId}` }],
-						[{ text: 'Back', callback_data: 'favorites' }],
+						[{ text: '💸 Option price', callback_data: `change_notification_option_price_${optionId}` },
+							{ text: '⏰ Changes', callback_data: `change_notification_change_${optionId}` }],
+						[{ text: '🗑 Remove Settings', callback_data: `remove_notification_settings_${optionId}` }],
+						[{ text: '< Back', callback_data: 'favorites' }],
 					],
 				}),
 			},

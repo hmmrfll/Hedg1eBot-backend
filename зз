@@ -1,0 +1,39 @@
+т. е.  нужен скрипт который будет вызываться в оределенное время. проходится по всем опционам у каждого пользователя. Сравнивать даты эксперации с теми которые мы будем запрашивать по этому методу. Если дата эксперации не будет в списке доступных дат. Этот опцион с этой датой надо будет удалить. Время по которому надо будет запускать скрипт возьми из метода ниже. Там уже все правильно натсроено.
+
+function getNextThreeDatesAndFridays() {
+    const dates = [];
+    const fridays = [];
+    let currentDate = moment.tz('Europe/London').startOf('day');
+
+    // Проверка текущего времени и добавление ближайшей даты
+    if (moment.tz('Europe/London').hour() >= 9) {
+        currentDate = currentDate.add(1, 'days');
+    }
+
+    // Добавление трех ближайших дат
+    for (let i = 0; i < 3; i++) {
+        dates.push(currentDate.clone());
+        currentDate = currentDate.add(1, 'days');
+    }
+
+    // Перезапуск currentDate для поиска будущих пятниц
+    currentDate = moment.tz('Europe/London').startOf('day');
+    if (moment.tz('Europe/London').hour() >= 9) {
+        currentDate = currentDate.add(1, 'days');
+    }
+
+    // Добавление будущих пятниц
+    let fridayCount = 0;
+    while (fridayCount < 4) {
+        if (currentDate.day() === 5) {
+            const isInNextThreeDays = dates.some(date => date.isSame(currentDate, 'day'));
+            if (!isInNextThreeDays) {
+                fridays.push(currentDate.clone());
+                fridayCount++;
+            }
+        }
+        currentDate = currentDate.add(1, 'days');
+    }
+
+    return { dates, fridays };
+}

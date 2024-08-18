@@ -12,6 +12,7 @@ const trackSchema = new mongoose.Schema({
 	percentChange: { type: Number, default: 0 },
 	lastPrice: { type: Number, default: 0 },
 	timeFrame: { type: Number, default: 0 },
+	notificationPending: { type: Boolean, default: false },
 })
 
 // Схема для пользователя
