@@ -18,11 +18,23 @@ async function updateLastPricesForUser(userId) {
             return;
         }
 
-        for (let track of user.tracks) {
+        // Обновляем lastPrice и удаляем опционы с lastPriceInUSD, равным нулю
+        user.tracks = await Promise.all(user.tracks.map(async (track) => {
             const instrumentName = `${track.asset}-${track.expiryDate}-${track.strikePrice}-${track.optionType[0].toUpperCase()}`;
             const lastPriceInUSD = await fetchOptionPriceInUSD(track.asset, instrumentName, track.optionType);
+
+            // Если цена опциона равна нулю, возвращаем null, чтобы его можно было удалить позже
+            if (lastPriceInUSD === 0) {
+                console.log(`Removing option with instrument name: ${instrumentName} due to last price being 0`);
+                return null;
+            }
+
             track.lastPrice = parseFloat(lastPriceInUSD.toFixed(2));
-        }
+            return track;
+        }));
+
+        // Удаляем null-значения (опционы с lastPriceInUSD, равным 0)
+        user.tracks = user.tracks.filter(track => track !== null);
 
         await user.save();
         console.log('Last prices updated successfully for user:', user.username);
@@ -30,5 +42,6 @@ async function updateLastPricesForUser(userId) {
         console.error('Error updating last prices:', error);
     }
 }
+
 
 module.exports = { updateLastPricesForUser, fetchOptionPriceInUSD };
