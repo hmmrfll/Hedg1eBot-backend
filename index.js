@@ -125,12 +125,25 @@ For any assistance or inquiries, please contact our support team at: support@hed
             }
 
             if (userState[chatId].state === 'waitingForAllowedLoss') {
-                const allowedLoss = validateNumberInput(text);
-                if (allowedLoss === null) {
+                let allowedLoss = text.trim();
+
+                // Check if the input starts with + or -
+                if (!allowedLoss.startsWith('+') && !allowedLoss.startsWith('-')) {
+                    return bot.sendMessage(chatId, 'Please enter the allowed loss with + or - before the percentage (e.g., +10, -5).');
+                }
+
+                // Extract the numeric part and validate it
+                allowedLoss = allowedLoss.slice(1);
+                const numericLoss = validateNumberInput(allowedLoss);
+
+                if (numericLoss === null) {
                     return bot.sendMessage(chatId, 'Please enter a valid allowed loss percentage (e.g., 0.5, 1.5, 10).');
                 }
-                userState[chatId].allowedLoss = allowedLoss;
+
+                // Store the allowed loss as positive or negative based on the sign
+                userState[chatId].allowedLoss = text.startsWith('+') ? numericLoss : -numericLoss;
                 userState[chatId].state = null;
+
                 return confirmData(chatId, userState[chatId]);
             }
 
@@ -739,11 +752,19 @@ For any assistance or inquiries, please contact our support team at: support@hed
                 userState[chatId].asset = data;
                 userState[chatId].state = 'waitingForPurchasePrice';
                 return askPurchasePrice(chatId, data);
-            } else if (data === "daily_save" || data === "weekly_save") {
-                const optionType = getOptionTypeFromCallbackData(data);
-                const suggestions = optionType === 'Daily' ? userState[chatId].dailySuggestions : userState[chatId].weeklySuggestions;
+            } else if (data === "daily_save" || data === "weekly_save" || data === "monthly_save") {
+                let suggestions;
 
-                console.log('Option type:', optionType);
+                // Map the option type directly from data
+                if (data === 'daily_save') {
+                    suggestions = userState[chatId].dailySuggestions;
+                } else if (data === 'weekly_save') {
+                    suggestions = userState[chatId].weeklySuggestions;
+                } else if (data === 'monthly_save') {
+                    suggestions = userState[chatId].monthlySuggestions;
+                }
+
+                console.log('Option type:', data.replace('_save', ''));
                 console.log('Suggestions:', suggestions);
 
                 if (suggestions && !userState[chatId].isSaving) {
@@ -754,7 +775,12 @@ For any assistance or inquiries, please contact our support team at: support@hed
                     await bot.answerCallbackQuery(query.id, { text: 'No options to save.' });
                 }
             } else if (data === "all_save") {
-                const allSuggestions = [...(userState[chatId].dailySuggestions || []), ...(userState[chatId].weeklySuggestions || [])];
+                const allSuggestions = [
+                    ...(userState[chatId].dailySuggestions || []),
+                    ...(userState[chatId].weeklySuggestions || []),
+                    ...(userState[chatId].monthlySuggestions || []) // Add Monthly suggestions here
+                ];
+
                 if (allSuggestions.length > 0 && !userState[chatId].isSaving) {
                     userState[chatId].isSaving = true;
                     await saveTracks(bot, chatId, allSuggestions, userState[chatId].asset, parseFloat(userState[chatId].quantity), username, messageId);
@@ -763,7 +789,12 @@ For any assistance or inquiries, please contact our support team at: support@hed
                     await bot.answerCallbackQuery(query.id, { text: 'No options to save.' });
                 }
             } else if (data === "specific_save") {
-                const allSuggestions = [...(userState[chatId].dailySuggestions || []), ...(userState[chatId].weeklySuggestions || [])];
+                const allSuggestions = [
+                    ...(userState[chatId].dailySuggestions || []),
+                    ...(userState[chatId].weeklySuggestions || []),
+                    ...(userState[chatId].monthlySuggestions || []) // Add Monthly suggestions here
+                ];
+
                 const uniqueDates = Array.from(new Set(allSuggestions.map(s => s.expiration)));
 
                 const specificOptionPrice = {
@@ -791,7 +822,13 @@ For any assistance or inquiries, please contact our support team at: support@hed
                 } else {
                     userState[chatId].selectedDates = userState[chatId].selectedDates.filter(d => d !== date);
                 }
-                const allSuggestions = [...(userState[chatId].dailySuggestions || []), ...(userState[chatId].weeklySuggestions || [])];
+
+                const allSuggestions = [
+                    ...(userState[chatId].dailySuggestions || []),
+                    ...(userState[chatId].weeklySuggestions || []),
+                    ...(userState[chatId].monthlySuggestions || []) // Add Monthly suggestions here
+                ];
+
                 const uniqueDates = Array.from(new Set(allSuggestions.map(s => s.expiration)));
 
                 const specificOptionPrice = {
@@ -811,7 +848,11 @@ For any assistance or inquiries, please contact our support team at: support@hed
                 await bot.editMessageReplyMarkup(specificOptionPrice.reply_markup, { chat_id: chatId, message_id: messageId });
             } else if (data === 'save_selected') {
                 const selectedDates = userState[chatId].selectedDates;
-                const specificSuggestions = [...userState[chatId].dailySuggestions, ...userState[chatId].weeklySuggestions].filter(s => selectedDates.includes(s.expiration));
+                const specificSuggestions = [
+                    ...userState[chatId].dailySuggestions,
+                    ...userState[chatId].weeklySuggestions,
+                    ...userState[chatId].monthlySuggestions // Add Monthly suggestions here
+                ].filter(s => selectedDates.includes(s.expiration));
 
                 if (specificSuggestions.length > 0 && !userState[chatId].isSaving) {
                     userState[chatId].isSaving = true;
@@ -842,7 +883,6 @@ For any assistance or inquiries, please contact our support team at: support@hed
                         }
                     );
                 }
-
             } else if (data.startsWith('remove_notification_price_')) {
                 const trackId = data.replace('remove_notification_price_', '');
 
@@ -982,7 +1022,15 @@ const askQuantity = async (chatId) => {
 };
 
 const askAllowedLoss = async (chatId) => {
-    await bot.sendMessage(chatId, 'Enter the optimal allowed loss (%):');
+    await bot.sendMessage(chatId, 'Enter the allowed loss with + or - before the percentage (e.g., +10, -5).');
+//     await bot.sendMessage(chatId,
+//         `Please enter the allowed loss percentage.
+// You must include either a '+' or '-' sign before the number to indicate whether you want to increase or decrease the value.
+// For example:
+// - "+10" means you're allowing a 10% increase in price.
+// - "-5" means you're allowing a 5% decrease in price.
+//
+// Make sure to enter a valid percentage (e.g., +10, -5):`);
 };
 
 const confirmData = async (chatId, data) => {
@@ -995,6 +1043,7 @@ const confirmData = async (chatId, data) => {
 
         const dailyMessage = suggestions.daily.map(s => `Expiration: ${s.expiration} (${s.chosenStrike}), Hedge: ${(s.hedgeCost).toFixed(2)} $`).join('\n');
         const weeklyMessage = suggestions.weekly.map(s => `Expiration: ${s.expiration} (${s.chosenStrike}), Hedge: ${(s.hedgeCost).toFixed(2)} $`).join('\n');
+        const monthlyMessage = suggestions.monthly.map(s => `Expiration: ${s.expiration} (${s.chosenStrike}), Hedge: ${(s.hedgeCost).toFixed(2)} $`).join('\n');
 
         const message = `Your data has been collected:
 
@@ -1009,6 +1058,9 @@ ${dailyMessage}
 <b>Hedge suggestions (Weekly):</b>
 ${weeklyMessage}
 
+<b>Hedge suggestions (Monthly):</b>
+${monthlyMessage}
+
 Which options would you like to save:
 `;
 
@@ -1016,6 +1068,7 @@ Which options would you like to save:
 
         userState[chatId].dailySuggestions = suggestions.daily;
         userState[chatId].weeklySuggestions = suggestions.weekly;
+        userState[chatId].monthlySuggestions = suggestions.monthly;
         userState[chatId].selectedDates = [];
 
     } catch (error) {
@@ -1039,12 +1092,12 @@ const saveTracks = async (bot, chatId, suggestions, asset, quantity, username, m
             asset: asset,
             expiryDate: suggestion.expiration,
             strikePrice: suggestion.chosenStrike,
-            optionType: 'Put',
+            optionType: 'Put',  // Assuming 'Put', this should be set dynamically if needed
             optionPrice: Math.round((suggestion.hedgeCost / quantity) * 100) / 100,
-            notificationPrice: 0,  // Установка значения по умолчанию
-            percentChange: 0,       // Установка значения по умолчанию
-            lastPrice: 0,           // Установка значения по умолчанию
-            timeFrame: 0            // Установка значения по умолчанию
+            notificationPrice: 0,  // Default value
+            percentChange: 0,       // Default value
+            lastPrice: 0,           // Default value
+            timeFrame: 0            // Default value
         }));
 
         console.log('Tracks to be saved:', tracks);
@@ -1056,8 +1109,10 @@ const saveTracks = async (bot, chatId, suggestions, asset, quantity, username, m
 
         console.log('Tracks saved successfully.');
 
+        // Clear suggestions from userState
         delete userState[chatId].dailySuggestions;
         delete userState[chatId].weeklySuggestions;
+        delete userState[chatId].monthlySuggestions; // Clear Monthly suggestions
         delete userState[chatId].selectedDates;
 
         await welcomeMessage(bot, chatId, username, messageId);
@@ -1066,6 +1121,7 @@ const saveTracks = async (bot, chatId, suggestions, asset, quantity, username, m
         await bot.sendMessage(chatId, 'Error saving options. Please try again later.');
     }
 };
+
 
 const generateUniqueId = () => {
     return Math.random().toString(36).substring(2, 15);

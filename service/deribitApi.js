@@ -90,26 +90,27 @@ async function fetchOptionPrice(asset, instrumentName) {
 function getNextThreeDatesAndFridays() {
     const dates = [];
     const fridays = [];
+    const monthly = [];
     let currentDate = moment.tz('Europe/London').startOf('day');
 
-    // Проверка текущего времени и добавление ближайшей даты
+    // Check current time and add the nearest date
     if (moment.tz('Europe/London').hour() >= 9) {
         currentDate = currentDate.add(1, 'days');
     }
 
-    // Добавление трех ближайших дат
+    // Add the next three closest dates
     for (let i = 0; i < 3; i++) {
         dates.push(currentDate.clone());
         currentDate = currentDate.add(1, 'days');
     }
 
-    // Перезапуск currentDate для поиска будущих пятниц
+    // Reset currentDate for finding future Fridays
     currentDate = moment.tz('Europe/London').startOf('day');
     if (moment.tz('Europe/London').hour() >= 9) {
         currentDate = currentDate.add(1, 'days');
     }
 
-    // Добавление будущих пятниц
+    // Add future Fridays (weekly)
     let fridayCount = 0;
     while (fridayCount < 4) {
         if (currentDate.day() === 5) {
@@ -122,7 +123,14 @@ function getNextThreeDatesAndFridays() {
         currentDate = currentDate.add(1, 'days');
     }
 
-    return { dates, fridays };
+    // Add last Friday of each upcoming month (Monthly expiration)
+    for (let i = 0; i < 2; i++) { // Adjust number of months to look ahead
+        const nextMonth = moment().add(i, 'months').endOf('month');
+        const lastFriday = nextMonth.day(-2); // Find last Friday of the month
+        monthly.push(lastFriday);
+    }
+
+    return { dates, fridays, monthly };
 }
 
 // Функция для нахождения ближайшего доступного страйка для конкретной даты
@@ -141,41 +149,50 @@ function findClosestStrike(strikePrice, availableStrikes) {
     return closestStrike;
 }
 
+const fetchAvailableExpirations = async (asset) => {
+    try {
+        const response = await axios.get(`https://www.deribit.com/api/v2/public/get_instruments?currency=${asset}&kind=option`);
+        const instruments = response.data.result;
+
+        // Extract unique expiration dates from instruments
+        const expirations = Array.from(new Set(instruments.map(i => moment.unix(i.expiration_timestamp / 1000).format('DMMMYY').toUpperCase())));
+
+        return expirations;
+    } catch (error) {
+        console.error(`Error fetching available expirations from Deribit:`, error);
+        return [];
+    }
+};
+
+
 // Функция для получения предложений по хеджированию
 async function getHedgeSuggestions(asset, purchasePrice, quantity, allowedLoss) {
-    console.log(`Data for hedge calculation:\nAsset: ${asset}\nPurchase Price: ${purchasePrice}\nQuantity: ${quantity}\nAllowed Loss: ${allowedLoss}`);
+    const strikePrice = allowedLoss > 0
+        ? purchasePrice + (purchasePrice * (allowedLoss / 100))
+        : purchasePrice - (purchasePrice * (Math.abs(allowedLoss) / 100));
 
-    const strikePrice = calculateStrikePrice(purchasePrice, allowedLoss);
-    console.log(`Calculated strike price: ${strikePrice}`);
+    // Fetch available expiration dates from Deribit
+    const availableExpirations = await fetchAvailableExpirations(asset);
 
     const { dates, fridays } = getNextThreeDatesAndFridays();
 
-    // Получение текущей рыночной цены актива
     const marketPrice = await fetchMarketPrice(asset);
 
     const dailySuggestions = [];
     const weeklySuggestions = [];
+    const monthlySuggestions = [];
 
-    // Обрабатываем каждую дату
+    // Process Daily suggestions
     for (const date of dates) {
-        try {
-            const formattedDate = moment(date).format('DMMMYY').toUpperCase();
-            const availableInstruments = await getAvailableInstruments(asset, formattedDate);
+        const formattedDate = moment(date).format('DMMMYY').toUpperCase();
+        if (!availableExpirations.includes(formattedDate)) continue; // Skip if not in available expirations
 
-            // Получаем доступные страйки для текущей даты
+        const availableInstruments = await getAvailableInstruments(asset, formattedDate);
+        if (availableInstruments.length > 0) {
             const availableStrikes = Array.from(new Set(availableInstruments.map(i => i.strike))).sort((a, b) => a - b);
-
-            if (availableStrikes.length === 0) {
-                console.log(`No available strikes for date ${formattedDate}`);
-                continue;
-            }
-
-            // Находим ближайший страйк
             const closestStrike = findClosestStrike(strikePrice, availableStrikes);
-            console.log(`Date: ${formattedDate} | Chosen closest strike: ${closestStrike} for calculated strike price: ${strikePrice}`);
             const instrumentName = `${asset.toUpperCase()}-${formattedDate}-${closestStrike}-P`;
 
-            // Проверяем наличие инструмента
             if (availableInstruments.some(i => i.instrument_name === instrumentName)) {
                 const optionPrice = await fetchOptionPrice(asset, instrumentName);
                 const hedgeCost = optionPrice * marketPrice * quantity;
@@ -184,34 +201,21 @@ async function getHedgeSuggestions(asset, purchasePrice, quantity, allowedLoss) 
                     hedgeCost: hedgeCost,
                     chosenStrike: closestStrike
                 });
-            } else {
-                console.log(`Instrument not found: ${instrumentName}`);
             }
-        } catch (error) {
-            console.error(`Error fetching option price for date ${date.format('DMMMYY').toUpperCase()}:`, error);
         }
     }
 
-    // Обрабатываем каждую пятницу
+    // Process Weekly suggestions
     for (const friday of fridays) {
-        try {
-            const formattedDate = moment(friday).format('DMMMYY').toUpperCase();
-            const availableInstruments = await getAvailableInstruments(asset, formattedDate);
+        const formattedDate = moment(friday).format('DMMMYY').toUpperCase();
+        if (!availableExpirations.includes(formattedDate)) continue; // Skip if not in available expirations
 
-            // Получаем доступные страйки для текущей пятницы
+        const availableInstruments = await getAvailableInstruments(asset, formattedDate);
+        if (availableInstruments.length > 0) {
             const availableStrikes = Array.from(new Set(availableInstruments.map(i => i.strike))).sort((a, b) => a - b);
-
-            if (availableStrikes.length === 0) {
-                console.log(`No available strikes for date ${formattedDate}`);
-                continue;
-            }
-
-            // Находим ближайший страйк
             const closestStrike = findClosestStrike(strikePrice, availableStrikes);
-            console.log(`Date: ${formattedDate} | Chosen closest strike: ${closestStrike} for calculated strike price: ${strikePrice}`);
             const instrumentName = `${asset.toUpperCase()}-${formattedDate}-${closestStrike}-P`;
 
-            // Проверяем наличие инструмента
             if (availableInstruments.some(i => i.instrument_name === instrumentName)) {
                 const optionPrice = await fetchOptionPrice(asset, instrumentName);
                 const hedgeCost = optionPrice * marketPrice * quantity;
@@ -220,15 +224,37 @@ async function getHedgeSuggestions(asset, purchasePrice, quantity, allowedLoss) 
                     hedgeCost: hedgeCost,
                     chosenStrike: closestStrike
                 });
-            } else {
-                console.log(`Instrument not found: ${instrumentName}`);
             }
-        } catch (error) {
-            console.error(`Error fetching option price for date ${friday.format('DMMMYY').toUpperCase()}:`, error);
         }
     }
 
-    return { daily: dailySuggestions, weekly: weeklySuggestions };
+    // Process first 3 Monthly suggestions (dates that are not in Daily or Weekly)
+    const dailyAndWeeklyExpirations = [...dailySuggestions, ...weeklySuggestions].map(s => s.expiration);
+    const monthlyExpirations = availableExpirations
+        .filter(exp => !dailyAndWeeklyExpirations.includes(exp))
+        .slice(0, 3); // Take only the first 3 available monthly expirations
+
+    for (const monthlyExpiration of monthlyExpirations) {
+        const availableInstruments = await getAvailableInstruments(asset, monthlyExpiration);
+
+        if (availableInstruments.length > 0) {
+            const availableStrikes = Array.from(new Set(availableInstruments.map(i => i.strike))).sort((a, b) => a - b);
+            const closestStrike = findClosestStrike(strikePrice, availableStrikes);
+            const instrumentName = `${asset.toUpperCase()}-${monthlyExpiration}-${closestStrike}-P`;
+
+            if (availableInstruments.some(i => i.instrument_name === instrumentName)) {
+                const optionPrice = await fetchOptionPrice(asset, instrumentName);
+                const hedgeCost = optionPrice * marketPrice * quantity;
+                monthlySuggestions.push({
+                    expiration: monthlyExpiration,
+                    hedgeCost: hedgeCost,
+                    chosenStrike: closestStrike
+                });
+            }
+        }
+    }
+
+    return { daily: dailySuggestions, weekly: weeklySuggestions, monthly: monthlySuggestions };
 }
 
 

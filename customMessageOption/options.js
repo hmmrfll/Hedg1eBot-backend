@@ -25,7 +25,8 @@ module.exports = {
             inline_keyboard: [
                 [
                     {text: `🗓 Daily`, callback_data: "daily_save"},
-                    {text: `📮 Weekly`, callback_data: "weekly_save"}
+                    {text: `📮 Weekly`, callback_data: "weekly_save"},
+                    {text: `📆 Monthly`, callback_data: "monthly_save"} // Add Monthly button
                 ],
                 [
                     {text: `🎰 ALL`, callback_data: "all_save"},
