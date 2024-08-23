@@ -1022,15 +1022,13 @@ const askQuantity = async (chatId) => {
 };
 
 const askAllowedLoss = async (chatId) => {
-    await bot.sendMessage(chatId, 'Enter the allowed loss with + or - before the percentage (e.g., +10, -5).');
-//     await bot.sendMessage(chatId,
-//         `Please enter the allowed loss percentage.
-// You must include either a '+' or '-' sign before the number to indicate whether you want to increase or decrease the value.
-// For example:
-// - "+10" means you're allowing a 10% increase in price.
-// - "-5" means you're allowing a 5% decrease in price.
-//
-// Make sure to enter a valid percentage (e.g., +10, -5):`);
+    // await bot.sendMessage(chatId, 'Enter the allowed loss with + or - before the percentage (e.g., +10, -5).');
+    await bot.sendMessage(chatId,
+        `Enter your preferred hedge point:
+
+Examples:
++5: You want to hedge when your asset has gained 5% from your purchase price.
+-5: You want to hedge against a potential loss after a 5% decrease from your purchase price.`);
 };
 
 const confirmData = async (chatId, data) => {
